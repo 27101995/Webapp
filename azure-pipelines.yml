@@ -13,28 +13,46 @@ variables:
   imageName: 'my-web-app'
   acrName: 'myacr.azurecr.io'
 
-steps:
-- task: UsePythonVersion@0
-  inputs:
-    versionSpec: '3.9'
-    addToPath: true
+stages:
+- stage: BuildAndPush
+  displayName: 'Build and Push Docker Image'
+  jobs:
+    - job: Build
+      displayName: 'Build and Push'
+      steps:
+        - task: UsePythonVersion@0
+          inputs:
+            versionSpec: '3.9'
+            addToPath: true
 
-- script: |
-    pip install -r requirements.txt
-  displayName: 'Install dependencies'
+        - script: |
+            pip install -r requirements.txt
+          displayName: 'Install dependencies'
 
-- task: Docker@2
-  inputs:
-    containerRegistry: '$(dockerRegistryServiceConnection)'
-    repository: '$(imageName)'
-    command: 'buildAndPush'
-    Dockerfile: '**/Dockerfile'
-    tags: '$(Build.BuildId)'
+        - task: Docker@2
+          inputs:
+            containerRegistry: '$(dockerRegistryServiceConnection)'
+            repository: '$(imageName)'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: '$(Build.BuildId)'
 
-- task: KubernetesManifest@0
-  inputs:
-    action: 'deploy'
-    kubernetesServiceConnection: '$(k8sServiceConnection)'
-    namespace: 'default'
-    manifests: '**/deployment.yaml'
-    containers: '$(acrName)/$(imageName):$(Build.BuildId)'
+- stage: DeployToStaging
+  displayName: 'Deploy to Staging'
+  dependsOn: BuildAndPush
+  environment: 
+    name: 'staging'
+    resourceType: 'Kubernetes'
+  jobs:
+    - job: Deploy
+      displayName: 'Deploy to Staging Job'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - task: KubernetesManifest@0
+          inputs:
+            action: 'deploy'
+            kubernetesServiceConnection: '$(k8sServiceConnection)'
+            namespace: 'staging'  # Ensure the correct staging namespace here
+            manifests: '**/deployment.yaml'  # Ensure this path is correct and the file exists
+            containers: '$(acrName)/$(imageName):$(Build.BuildId)'
